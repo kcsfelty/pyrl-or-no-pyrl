@@ -36,6 +36,7 @@ def main() -> None:
         decay_rate=0.01,
         staircase=False,
     )
+    train_step_counter = tf.Variable(0)
     agent = categorical_dqn_agent.CategoricalDqnAgent(
         train_env.time_step_spec(),
         train_env.action_spec(),
@@ -44,9 +45,9 @@ def main() -> None:
         td_errors_loss_fn=tf.keras.losses.Huber(
             reduction=tf.keras.losses.Reduction.NONE
         ),
-        epsilon_greedy=epsilon_schedule,
+        epsilon_greedy=(lambda: epsilon_schedule(train_step_counter)),
         gamma=1.0,
-        train_step_counter=tf.Variable(0),
+        train_step_counter=train_step_counter,
     )
     agent.initialize()
 

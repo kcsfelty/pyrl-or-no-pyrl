@@ -41,7 +41,9 @@ def collect_step(environment, policy, buffer):
     buffer.add_batch(traj)
 
 
-def build_agent(agent_name: str, train_env, epsilon_greedy=None):
+def build_agent(
+    agent_name: str, train_env, epsilon_greedy=None, train_step_counter=None
+):
     if agent_name == "dqn":
         q_net = q_network.QNetwork(
             train_env.observation_spec(),
@@ -49,6 +51,8 @@ def build_agent(agent_name: str, train_env, epsilon_greedy=None):
             fc_layer_params=(128, 64),
         )
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+        if train_step_counter is None:
+            train_step_counter = tf.Variable(0)
         agent = dqn_agent.DqnAgent(
             train_env.time_step_spec(),
             train_env.action_spec(),
@@ -59,7 +63,7 @@ def build_agent(agent_name: str, train_env, epsilon_greedy=None):
             ),
             epsilon_greedy=epsilon_greedy,
             gamma=1.0,
-            train_step_counter=tf.Variable(0),
+            train_step_counter=train_step_counter,
         )
         return agent
 
@@ -70,6 +74,8 @@ def build_agent(agent_name: str, train_env, epsilon_greedy=None):
             fc_layer_params=(128, 64),
         )
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+        if train_step_counter is None:
+            train_step_counter = tf.Variable(0)
         agent = categorical_dqn_agent.CategoricalDqnAgent(
             train_env.time_step_spec(),
             train_env.action_spec(),
@@ -80,7 +86,7 @@ def build_agent(agent_name: str, train_env, epsilon_greedy=None):
             ),
             epsilon_greedy=epsilon_greedy,
             gamma=1.0,
-            train_step_counter=tf.Variable(0),
+            train_step_counter=train_step_counter,
         )
         return agent
 
@@ -250,7 +256,13 @@ def main() -> None:
             decay_rate=0.01,
             staircase=False,
         )
-        agent = build_agent(args.agent, train_env, epsilon_greedy=epsilon_schedule)
+        train_step_counter = tf.Variable(0)
+        agent = build_agent(
+            args.agent,
+            train_env,
+            epsilon_greedy=(lambda: epsilon_schedule(train_step_counter)),
+            train_step_counter=train_step_counter,
+        )
         agent.initialize()
         train_agent(agent, train_env, train_steps=args.train_steps)
         policy = agent.policy
