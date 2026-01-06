@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env/
+*.egg-info/
+.dist/
+build/
+
+# TF-Agents artifacts
+checkpoints/
+policies/
+logs/

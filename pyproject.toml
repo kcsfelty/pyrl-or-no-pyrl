@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyrl-or-no-pyrl"
+version = "0.1.0"
+description = "Deal or No Deal reinforcement learning with TF-Agents (PPO, DQN, C51)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "kcsfelty"}]
+
+[project.urls]
+Homepage = "https://github.com/kcsfelty/pyrl-or-no-pyrl"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

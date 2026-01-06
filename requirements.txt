@@ -1,0 +1,5 @@
+tensorflow>=2.13
+# tf-agents-nightly often tracks TF releases better; switch if needed.
+tf-agents>=0.18
+numpy>=1.23
+pytest>=7.0
