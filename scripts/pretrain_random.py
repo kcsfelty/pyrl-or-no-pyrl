@@ -73,22 +73,25 @@ def append_buffer(path: str, new_data: dict) -> dict:
     return merged
 
 
-def load_into_replay(buffer, data: dict):
-    for i in range(data["obs"].shape[0]):
+def load_into_replay(buffer, data: dict, batch_size: int):
+    total = data["obs"].shape[0]
+    limit = total - (total % batch_size)
+    for start in range(0, limit, batch_size):
+        end = start + batch_size
         time_step = ts.TimeStep(
-            step_type=tf.convert_to_tensor(data["step_type"][i]),
-            reward=tf.convert_to_tensor(0.0),
-            discount=tf.convert_to_tensor(1.0),
-            observation=tf.convert_to_tensor(data["obs"][i]),
+            step_type=tf.convert_to_tensor(data["step_type"][start:end]),
+            reward=tf.zeros((batch_size,), dtype=tf.float32),
+            discount=tf.ones((batch_size,), dtype=tf.float32),
+            observation=tf.convert_to_tensor(data["obs"][start:end]),
         )
         next_time_step = ts.TimeStep(
-            step_type=tf.convert_to_tensor(data["next_step_type"][i]),
-            reward=tf.convert_to_tensor(data["reward"][i]),
-            discount=tf.convert_to_tensor(data["discount"][i]),
-            observation=tf.convert_to_tensor(data["next_obs"][i]),
+            step_type=tf.convert_to_tensor(data["next_step_type"][start:end]),
+            reward=tf.convert_to_tensor(data["reward"][start:end]),
+            discount=tf.convert_to_tensor(data["discount"][start:end]),
+            observation=tf.convert_to_tensor(data["next_obs"][start:end]),
         )
         action_step = policy_step.PolicyStep(
-            action=tf.convert_to_tensor(data["action"][i]),
+            action=tf.convert_to_tensor(data["action"][start:end]),
             state=(),
             info=(),
         )
@@ -122,7 +125,7 @@ def pretrain_dqn(train_env, data: dict, train_steps: int):
         max_length=max(10000, data["obs"].shape[0] + 1),
     )
 
-    load_into_replay(replay_buffer, data)
+    load_into_replay(replay_buffer, data, batch_size=train_env.batch_size)
 
     dataset = replay_buffer.as_dataset(
         num_parallel_calls=3, sample_batch_size=64, num_steps=2
