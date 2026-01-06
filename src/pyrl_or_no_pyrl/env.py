@@ -81,8 +81,8 @@ class DealOrNoDealEnv(py_environment.PyEnvironment):
     def _reset_state(self) -> None:
         self._remaining_mask = np.ones(self._n_cases, dtype=np.float32)
         self._player_index = int(self._rng.integers(0, self._n_cases))
-        self._step = 0
-        self._offer = banker_offer(self._remaining_values(), self._step, self._max_steps)
+        self._step_count = 0
+        self._offer = banker_offer(self._remaining_values(), self._step_count, self._max_steps)
         self._episode_ended = False
 
     def _remaining_values(self) -> np.ndarray:
@@ -119,14 +119,14 @@ class DealOrNoDealEnv(py_environment.PyEnvironment):
             opened = int(self._rng.choice(available))
             self._remaining_mask[opened] = 0.0
 
-        self._step += 1
+        self._step_count += 1
         remaining = self._remaining_values()
-        if remaining.size <= 1 or self._step >= self._max_steps:
+        if remaining.size <= 1 or self._step_count >= self._max_steps:
             self._episode_ended = True
             reward = float(self._values[self._player_index])
             return ts.termination(self._get_observation(), reward)
 
-        self._offer = banker_offer(remaining, self._step, self._max_steps)
+        self._offer = banker_offer(remaining, self._step_count, self._max_steps)
         return ts.transition(self._get_observation(), reward=0.0, discount=1.0)
 
 
