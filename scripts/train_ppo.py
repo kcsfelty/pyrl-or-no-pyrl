@@ -18,7 +18,7 @@ from train_common import compute_avg_return
 def main() -> None:
     configure_gpu()
 
-    batch_size = 32
+    batch_size = 128
     train_py_env = make_batched_env(batch_size=batch_size, seed=21)
     eval_py_env = make_batched_env(batch_size=1, seed=211)
     train_env = tf_py_environment.TFPyEnvironment(train_py_env)
