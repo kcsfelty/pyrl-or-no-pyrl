@@ -28,6 +28,8 @@ class SummaryStats:
     std_return: float
     deal_rate_per_decision: float
     deal_rate_per_episode: float
+    avg_decisions: float
+    avg_deal_step: float
     total_episodes: int
 
 
@@ -120,6 +122,8 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
     returns: List[float] = []
     deal_decisions = 0
     deal_episodes = 0
+    decisions_per_episode: List[int] = []
+    deal_steps: List[int] = []
 
     for episode in range(num_episodes):
         time_step = eval_env.reset()
@@ -128,6 +132,8 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
         done = False
 
         took_deal = False
+        deal_step = -1
+        decisions = 0
         while not done:
             remaining_values, offer, ev, max_val, remaining = extract_features(
                 time_step
@@ -143,6 +149,8 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
             if action == 0:
                 deal_decisions += 1
                 took_deal = True
+                if deal_step == -1:
+                    deal_step = step
 
             episode_return += reward
 
@@ -163,10 +171,13 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
 
             time_step = next_time_step
             step += 1
+            decisions += 1
 
         returns.append(episode_return)
         if took_deal:
             deal_episodes += 1
+            deal_steps.append(deal_step)
+        decisions_per_episode.append(decisions)
 
     stats = SummaryStats(
         avg_return=float(np.mean(returns)),
@@ -174,6 +185,8 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
         std_return=float(np.std(returns)),
         deal_rate_per_decision=float(deal_decisions / max(len(rows), 1)),
         deal_rate_per_episode=float(deal_episodes / max(len(returns), 1)),
+        avg_decisions=float(np.mean(decisions_per_episode)),
+        avg_deal_step=float(np.mean(deal_steps)) if deal_steps else -1.0,
         total_episodes=len(returns),
     )
     return rows, stats
@@ -208,17 +221,19 @@ def write_csv(path: str, rows: List[Dict[str, float]]):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent", choices=["dqn", "c51", "random"], default="dqn")
-    parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--train-steps", type=int, default=1024)
-    parser.add_argument("--eval-episodes", type=int, default=200)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--train-steps", type=int, default=256)
+    parser.add_argument("--eval-episodes", type=int, default=50)
     parser.add_argument("--seed", type=int, default=21)
+    parser.add_argument("--eval-seed", type=int, default=None)
     parser.add_argument("--out-csv", default="policy_eval.csv")
     args = parser.parse_args()
 
     configure_gpu()
 
     train_py_env = make_batched_env(batch_size=args.batch_size, seed=args.seed)
-    eval_py_env = make_batched_env(batch_size=1, seed=args.seed + 999)
+    eval_seed = args.eval_seed
+    eval_py_env = make_batched_env(batch_size=1, seed=eval_seed)
     train_env = tf_py_environment.TFPyEnvironment(train_py_env)
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
@@ -242,6 +257,9 @@ def main() -> None:
     print(f"Std return: {stats.std_return:.2f}")
     print(f"Deal action rate (per decision): {stats.deal_rate_per_decision:.3f}")
     print(f"Deal action rate (per episode): {stats.deal_rate_per_episode:.3f}")
+    print(f"Average decisions per episode: {stats.avg_decisions:.2f}")
+    if stats.avg_deal_step >= 0:
+        print(f"Average deal step (if deal taken): {stats.avg_deal_step:.2f}")
 
     bins = [0.0, 0.6, 0.8, 1.0, 1.2, 2.0, 10.0]
     ratio_summary = summarize_by_ratio(rows, bins)

@@ -106,7 +106,7 @@ class DealOrNoDealEnv(py_environment.PyEnvironment):
         if self._episode_ended:
             return self.reset()
 
-        action = int(action)
+        action = int(np.asarray(action).reshape(-1)[0])
         if action == 0:
             self._episode_ended = True
             reward = float(self._offer)
