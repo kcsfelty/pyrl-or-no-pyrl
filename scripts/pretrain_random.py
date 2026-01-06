@@ -16,6 +16,7 @@ from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import time_step as ts
 from tf_agents.trajectories import trajectory
 from tf_agents.trajectories import policy_step
+from tf_agents.trajectories import time_step
 
 from pyrl_or_no_pyrl import make_batched_env
 from pyrl_or_no_pyrl.utils import configure_gpu
@@ -29,6 +30,7 @@ def collect_branching_episodes(env, num_episodes: int) -> Tuple[dict, Dict[int, 
     discount_list: List[float] = []
     step_type_list: List[int] = []
     next_step_type_list: List[int] = []
+    decision_step_list: List[int] = []
 
     max_steps = int(env.pyenv.envs[0]._max_steps)
     deal_counts = {i: 0 for i in range(max_steps)}
@@ -50,6 +52,7 @@ def collect_branching_episodes(env, num_episodes: int) -> Tuple[dict, Dict[int, 
             discount_list.append(0.0)
             step_type_list.append(int(time_step.step_type.numpy().squeeze()))
             next_step_type_list.append(int(ts.StepType.LAST))
+            decision_step_list.append(step)
             if step in deal_counts:
                 deal_counts[step] += 1
 
@@ -65,6 +68,7 @@ def collect_branching_episodes(env, num_episodes: int) -> Tuple[dict, Dict[int, 
             discount_list.append(float(next_time_step.discount.numpy().squeeze()))
             step_type_list.append(int(time_step.step_type.numpy().squeeze()))
             next_step_type_list.append(int(next_time_step.step_type.numpy().squeeze()))
+            decision_step_list.append(step)
 
             done = bool(next_time_step.is_last().numpy().squeeze())
             time_step = next_time_step
@@ -79,6 +83,7 @@ def collect_branching_episodes(env, num_episodes: int) -> Tuple[dict, Dict[int, 
             "discount": np.asarray(discount_list, dtype=np.float32),
             "step_type": np.asarray(step_type_list, dtype=np.int32),
             "next_step_type": np.asarray(next_step_type_list, dtype=np.int32),
+            "decision_step": np.asarray(decision_step_list, dtype=np.int32),
         },
         deal_counts,
     )
@@ -98,53 +103,37 @@ def append_buffer(path: str, new_data: dict) -> dict:
     return merged
 
 
-def index_episodes_by_deal_step(data: dict) -> Dict[int, List[Tuple[int, int]]]:
-    """Return {deal_step: [(start_idx, end_idx), ...]} for each episode."""
-    actions = data["action"]
-    next_step_type = data["next_step_type"]
-    episodes: Dict[int, List[Tuple[int, int]]] = {}
-
-    step = 0
-    deal_step = None
-    start = 0
-    for i in range(len(actions)):
-        if deal_step is None and actions[i] == 0:
-            deal_step = step
-        if next_step_type[i] == 2:  # LAST
-            if deal_step is not None:
-                episodes.setdefault(int(deal_step), []).append((start, i + 1))
-            start = i + 1
-            step = 0
-            deal_step = None
-        else:
-            step += 1
-    return episodes
-
-
 def select_balanced_episodes(data: dict, target: int | None) -> dict:
-    """Return a filtered dataset balanced by deal step."""
-    episodes = index_episodes_by_deal_step(data)
-    if not episodes:
+    """Return a filtered dataset balanced by decision step."""
+    if "decision_step" not in data:
         return data
 
-    min_count = min(len(v) for v in episodes.values())
+    actions = data["action"]
+    steps = data["decision_step"]
+
+    deal_indices_by_step: Dict[int, List[int]] = {}
+    for idx, (action, step) in enumerate(zip(actions, steps)):
+        if action == 0:
+            deal_indices_by_step.setdefault(int(step), []).append(idx)
+
+    if not deal_indices_by_step:
+        return data
+
+    min_count = min(len(v) for v in deal_indices_by_step.values())
     if target is None:
         keep_per_step = min_count
     else:
         keep_per_step = min(target, min_count)
 
-    keep_ranges: List[Tuple[int, int]] = []
-    for step, ranges in episodes.items():
-        keep_ranges.extend(ranges[:keep_per_step])
-
-    if not keep_ranges:
-        return data
-
     keep_indices = []
-    for start, end in keep_ranges:
-        keep_indices.extend(range(start, end))
+    for step, indices in deal_indices_by_step.items():
+        for idx in indices[:keep_per_step]:
+            keep_indices.append(idx)
+            if idx + 1 < len(actions):
+                keep_indices.append(idx + 1)
 
     keep_indices = np.asarray(keep_indices, dtype=np.int64)
+    keep_indices.sort()
     return {key: data[key][keep_indices] for key in data.keys()}
 
 
@@ -214,6 +203,46 @@ def pretrain_dqn(train_env, data: dict, train_steps: int):
     return agent
 
 
+def eval_agent(policy, eval_env, num_episodes: int):
+    returns = []
+    deal_episodes = 0
+    decisions_per_episode = []
+
+    for _ in range(num_episodes):
+        time_step = eval_env.reset()
+        done = False
+        episode_return = 0.0
+        decisions = 0
+        took_deal = False
+
+        while not done:
+            action_step = policy.action(time_step)
+            action = int(action_step.action.numpy().squeeze())
+            next_time_step = eval_env.step(action_step.action)
+            reward = float(next_time_step.reward.numpy().squeeze())
+            done = bool(next_time_step.is_last().numpy().squeeze())
+
+            if action == 0:
+                took_deal = True
+
+            episode_return += reward
+            decisions += 1
+            time_step = next_time_step
+
+        returns.append(episode_return)
+        if took_deal:
+            deal_episodes += 1
+        decisions_per_episode.append(decisions)
+
+    return {
+        "avg_return": float(np.mean(returns)),
+        "median_return": float(np.median(returns)),
+        "std_return": float(np.std(returns)),
+        "deal_rate_per_episode": float(deal_episodes / max(len(returns), 1)),
+        "avg_decisions": float(np.mean(decisions_per_episode)),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
@@ -221,6 +250,7 @@ def main() -> None:
     parser.add_argument("--balance-target", type=int, default=None)
     parser.add_argument("--pretrain-steps", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--eval-episodes", type=int, default=100)
     parser.add_argument("--seed", type=int, default=21)
     args = parser.parse_args()
 
@@ -241,11 +271,24 @@ def main() -> None:
 
     agent = pretrain_dqn(train_env, balanced, train_steps=args.pretrain_steps)
 
+    eval_env_py = make_batched_env(batch_size=1, seed=args.seed + 999)
+    eval_env = tf_py_environment.TFPyEnvironment(eval_env_py)
+    eval_stats = eval_agent(agent.policy, eval_env, num_episodes=args.eval_episodes)
+
     print("Random buffer size:", data["obs"].shape[0])
     print("Balanced buffer size:", balanced["obs"].shape[0])
     print("Deal counts per step:", deal_counts)
     print("Pretrain steps:", args.pretrain_steps)
     print("Agent train_step:", int(agent.train_step_counter.numpy()))
+    print("Eval episodes:", args.eval_episodes)
+    print("Eval avg return:", f"{eval_stats['avg_return']:.2f}")
+    print("Eval median return:", f"{eval_stats['median_return']:.2f}")
+    print("Eval std return:", f"{eval_stats['std_return']:.2f}")
+    print(
+        "Eval deal rate (per episode):",
+        f"{eval_stats['deal_rate_per_episode']:.3f}",
+    )
+    print("Eval avg decisions:", f"{eval_stats['avg_decisions']:.2f}")
 
 
 if __name__ == "__main__":
