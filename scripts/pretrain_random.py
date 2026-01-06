@@ -21,9 +21,7 @@ from pyrl_or_no_pyrl import make_batched_env
 from pyrl_or_no_pyrl.utils import configure_gpu
 
 
-def collect_random_until_balanced(
-    env, policy, per_step_target: int
-) -> Tuple[dict, Dict[int, int]]:
+def collect_branching_episodes(env, num_episodes: int) -> Tuple[dict, Dict[int, int]]:
     obs_list: List[np.ndarray] = []
     next_obs_list: List[np.ndarray] = []
     action_list: List[int] = []
@@ -35,52 +33,42 @@ def collect_random_until_balanced(
     max_steps = int(env.pyenv.envs[0]._max_steps)
     deal_counts = {i: 0 for i in range(max_steps)}
 
-    def _is_full():
-        return all(count >= per_step_target for count in deal_counts.values())
-
-    while not _is_full():
+    for _ in range(num_episodes):
         time_step = env.reset()
         done = False
         step = 0
 
-        ep_obs: List[np.ndarray] = []
-        ep_next_obs: List[np.ndarray] = []
-        ep_action: List[int] = []
-        ep_reward: List[float] = []
-        ep_discount: List[float] = []
-        ep_step_type: List[int] = []
-        ep_next_step_type: List[int] = []
-
-        deal_step = -1
         while not done:
-            action_step = policy.action(time_step)
-            next_time_step = env.step(action_step.action)
+            obs = time_step.observation.numpy().squeeze()
+            offer = float(obs[-1])
 
-            ep_obs.append(time_step.observation.numpy().squeeze())
-            ep_next_obs.append(next_time_step.observation.numpy().squeeze())
-            ep_action.append(int(action_step.action.numpy().squeeze()))
-            ep_reward.append(float(next_time_step.reward.numpy().squeeze()))
-            ep_discount.append(float(next_time_step.discount.numpy().squeeze()))
-            ep_step_type.append(int(time_step.step_type.numpy().squeeze()))
-            ep_next_step_type.append(int(next_time_step.step_type.numpy().squeeze()))
+            # Synthetic Deal transition at this step.
+            obs_list.append(obs)
+            next_obs_list.append(obs)
+            action_list.append(0)
+            reward_list.append(offer)
+            discount_list.append(0.0)
+            step_type_list.append(int(time_step.step_type.numpy().squeeze()))
+            next_step_type_list.append(int(ts.StepType.LAST))
+            if step in deal_counts:
+                deal_counts[step] += 1
 
-            if int(action_step.action.numpy().squeeze()) == 0 and deal_step == -1:
-                deal_step = step
+            # Actual No Deal transition to advance the episode.
+            action = tf.convert_to_tensor([1], dtype=tf.int32)
+            next_time_step = env.step(action)
+            next_obs = next_time_step.observation.numpy().squeeze()
+
+            obs_list.append(obs)
+            next_obs_list.append(next_obs)
+            action_list.append(1)
+            reward_list.append(float(next_time_step.reward.numpy().squeeze()))
+            discount_list.append(float(next_time_step.discount.numpy().squeeze()))
+            step_type_list.append(int(time_step.step_type.numpy().squeeze()))
+            next_step_type_list.append(int(next_time_step.step_type.numpy().squeeze()))
 
             done = bool(next_time_step.is_last().numpy().squeeze())
             time_step = next_time_step
             step += 1
-
-        if deal_step >= 0 and deal_step in deal_counts:
-            if deal_counts[deal_step] < per_step_target:
-                deal_counts[deal_step] += 1
-                obs_list.extend(ep_obs)
-                next_obs_list.extend(ep_next_obs)
-                action_list.extend(ep_action)
-                reward_list.extend(ep_reward)
-                discount_list.extend(ep_discount)
-                step_type_list.extend(ep_step_type)
-                next_step_type_list.extend(ep_next_step_type)
 
     return (
         {
@@ -178,7 +166,7 @@ def pretrain_dqn(train_env, data: dict, train_steps: int):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--per-step-target", type=int, default=25)
+    parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--buffer-path", default="data/random_buffer.npz")
     parser.add_argument("--pretrain-steps", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -191,8 +179,8 @@ def main() -> None:
     env = tf_py_environment.TFPyEnvironment(env_py)
     policy = random_tf_policy.RandomTFPolicy(env.time_step_spec(), env.action_spec())
 
-    new_data, deal_counts = collect_random_until_balanced(
-        env, policy, per_step_target=args.per_step_target
+    new_data, deal_counts = collect_branching_episodes(
+        env, num_episodes=args.episodes
     )
     data = append_buffer(args.buffer_path, new_data)
 
