@@ -10,3 +10,5 @@ build/
 checkpoints/
 policies/
 logs/
+data/
+*.npz
