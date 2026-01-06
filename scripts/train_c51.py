@@ -16,7 +16,7 @@ from train_common import collect_step, compute_avg_return
 def main() -> None:
     configure_gpu()
 
-    batch_size = 128
+    batch_size = 512
     train_py_env = make_batched_env(batch_size=batch_size, seed=11)
     eval_py_env = make_batched_env(batch_size=1, seed=111)
     train_env = tf_py_environment.TFPyEnvironment(train_py_env)
@@ -56,7 +56,7 @@ def main() -> None:
     for _ in range(200):
         collect_step(train_env, agent.collect_policy, replay_buffer)
 
-    for step in range(1000):
+    for step in range(1024):
         collect_step(train_env, agent.collect_policy, replay_buffer)
         experience, _ = next(iterator)
         agent.train(experience)
