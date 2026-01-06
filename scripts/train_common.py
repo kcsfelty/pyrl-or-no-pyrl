@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+import numpy as np
 import tensorflow as tf
 from tf_agents.policies import random_tf_policy
 from tf_agents.trajectories import trajectory
@@ -26,7 +27,8 @@ def compute_avg_return(environment, policy, num_episodes: int = 10) -> float:
         while not time_step.is_last():
             action_step = policy.action(time_step)
             time_step = environment.step(action_step.action)
-            episode_return += float(time_step.reward)
+            reward = time_step.reward.numpy()
+            episode_return += float(np.mean(reward))
         total_return += episode_return
     return total_return / num_episodes
 

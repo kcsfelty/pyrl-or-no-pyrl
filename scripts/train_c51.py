@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import functools
-
 import tensorflow as tf
 from tf_agents.agents.categorical_dqn import categorical_dqn_agent
 from tf_agents.environments import tf_py_environment
@@ -36,7 +34,9 @@ def main() -> None:
         train_env.action_spec(),
         categorical_q_network=q_net,
         optimizer=optimizer,
-        td_errors_loss_fn=functools.partial(tf.keras.losses.Huber, reduction="none"),
+        td_errors_loss_fn=tf.keras.losses.Huber(
+            reduction=tf.keras.losses.Reduction.NONE
+        ),
         gamma=1.0,
         train_step_counter=tf.Variable(0),
     )
