@@ -98,6 +98,56 @@ def append_buffer(path: str, new_data: dict) -> dict:
     return merged
 
 
+def index_episodes_by_deal_step(data: dict) -> Dict[int, List[Tuple[int, int]]]:
+    """Return {deal_step: [(start_idx, end_idx), ...]} for each episode."""
+    actions = data["action"]
+    next_step_type = data["next_step_type"]
+    episodes: Dict[int, List[Tuple[int, int]]] = {}
+
+    step = 0
+    deal_step = None
+    start = 0
+    for i in range(len(actions)):
+        if deal_step is None and actions[i] == 0:
+            deal_step = step
+        if next_step_type[i] == 2:  # LAST
+            if deal_step is not None:
+                episodes.setdefault(int(deal_step), []).append((start, i + 1))
+            start = i + 1
+            step = 0
+            deal_step = None
+        else:
+            step += 1
+    return episodes
+
+
+def select_balanced_episodes(data: dict, target: int | None) -> dict:
+    """Return a filtered dataset balanced by deal step."""
+    episodes = index_episodes_by_deal_step(data)
+    if not episodes:
+        return data
+
+    min_count = min(len(v) for v in episodes.values())
+    if target is None:
+        keep_per_step = min_count
+    else:
+        keep_per_step = min(target, min_count)
+
+    keep_ranges: List[Tuple[int, int]] = []
+    for step, ranges in episodes.items():
+        keep_ranges.extend(ranges[:keep_per_step])
+
+    if not keep_ranges:
+        return data
+
+    keep_indices = []
+    for start, end in keep_ranges:
+        keep_indices.extend(range(start, end))
+
+    keep_indices = np.asarray(keep_indices, dtype=np.int64)
+    return {key: data[key][keep_indices] for key in data.keys()}
+
+
 def load_into_replay(buffer, data: dict, batch_size: int):
     total = data["obs"].shape[0]
     limit = total - (total % batch_size)
@@ -168,6 +218,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--buffer-path", default="data/random_buffer.npz")
+    parser.add_argument("--balance-target", type=int, default=None)
     parser.add_argument("--pretrain-steps", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=21)
@@ -183,13 +234,15 @@ def main() -> None:
         env, num_episodes=args.episodes
     )
     data = append_buffer(args.buffer_path, new_data)
+    balanced = select_balanced_episodes(data, target=args.balance_target)
 
     train_env_py = make_batched_env(batch_size=args.batch_size, seed=args.seed)
     train_env = tf_py_environment.TFPyEnvironment(train_env_py)
 
-    agent = pretrain_dqn(train_env, data, train_steps=args.pretrain_steps)
+    agent = pretrain_dqn(train_env, balanced, train_steps=args.pretrain_steps)
 
     print("Random buffer size:", data["obs"].shape[0])
+    print("Balanced buffer size:", balanced["obs"].shape[0])
     print("Deal counts per step:", deal_counts)
     print("Pretrain steps:", args.pretrain_steps)
     print("Agent train_step:", int(agent.train_step_counter.numpy()))
