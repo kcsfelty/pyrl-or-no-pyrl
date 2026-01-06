@@ -41,7 +41,7 @@ def collect_step(environment, policy, buffer):
     buffer.add_batch(traj)
 
 
-def build_agent(agent_name: str, train_env):
+def build_agent(agent_name: str, train_env, epsilon_greedy=None):
     if agent_name == "dqn":
         q_net = q_network.QNetwork(
             train_env.observation_spec(),
@@ -57,6 +57,7 @@ def build_agent(agent_name: str, train_env):
             td_errors_loss_fn=tf.keras.losses.Huber(
                 reduction=tf.keras.losses.Reduction.NONE
             ),
+            epsilon_greedy=epsilon_greedy,
             gamma=1.0,
             train_step_counter=tf.Variable(0),
         )
@@ -77,6 +78,7 @@ def build_agent(agent_name: str, train_env):
             td_errors_loss_fn=tf.keras.losses.Huber(
                 reduction=tf.keras.losses.Reduction.NONE
             ),
+            epsilon_greedy=epsilon_greedy,
             gamma=1.0,
             train_step_counter=tf.Variable(0),
         )
@@ -242,7 +244,13 @@ def main() -> None:
             eval_env.time_step_spec(), eval_env.action_spec()
         )
     else:
-        agent = build_agent(args.agent, train_env)
+        epsilon_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1.0,
+            decay_steps=args.train_steps,
+            decay_rate=0.01,
+            staircase=False,
+        )
+        agent = build_agent(args.agent, train_env, epsilon_greedy=epsilon_schedule)
         agent.initialize()
         train_agent(agent, train_env, train_steps=args.train_steps)
         policy = agent.policy

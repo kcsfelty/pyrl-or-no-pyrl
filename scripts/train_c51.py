@@ -17,6 +17,7 @@ def main() -> None:
     configure_gpu()
 
     batch_size = 64
+    train_steps = 256
     train_py_env = make_batched_env(batch_size=batch_size, seed=11)
     eval_py_env = make_batched_env(batch_size=1, seed=111)
     train_env = tf_py_environment.TFPyEnvironment(train_py_env)
@@ -29,6 +30,12 @@ def main() -> None:
     )
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+    epsilon_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=1.0,
+        decay_steps=train_steps,
+        decay_rate=0.01,
+        staircase=False,
+    )
     agent = categorical_dqn_agent.CategoricalDqnAgent(
         train_env.time_step_spec(),
         train_env.action_spec(),
@@ -37,6 +44,7 @@ def main() -> None:
         td_errors_loss_fn=tf.keras.losses.Huber(
             reduction=tf.keras.losses.Reduction.NONE
         ),
+        epsilon_greedy=epsilon_schedule,
         gamma=1.0,
         train_step_counter=tf.Variable(0),
     )
@@ -56,7 +64,7 @@ def main() -> None:
     for _ in range(200):
         collect_step(train_env, agent.collect_policy, replay_buffer)
 
-    for step in range(256):
+    for step in range(train_steps):
         collect_step(train_env, agent.collect_policy, replay_buffer)
         experience, _ = next(iterator)
         agent.train(experience)
