@@ -26,7 +26,8 @@ class SummaryStats:
     avg_return: float
     median_return: float
     std_return: float
-    deal_rate: float
+    deal_rate_per_decision: float
+    deal_rate_per_episode: float
     total_episodes: int
 
 
@@ -117,7 +118,8 @@ def extract_features(time_step) -> Tuple[np.ndarray, float, float, float, int]:
 def evaluate_policy(policy, eval_env, num_episodes: int):
     rows: List[Dict[str, float]] = []
     returns: List[float] = []
-    deal_count = 0
+    deal_decisions = 0
+    deal_episodes = 0
 
     for episode in range(num_episodes):
         time_step = eval_env.reset()
@@ -125,6 +127,7 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
         step = 0
         done = False
 
+        took_deal = False
         while not done:
             remaining_values, offer, ev, max_val, remaining = extract_features(
                 time_step
@@ -138,7 +141,8 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
             done = bool(next_time_step.is_last().numpy().squeeze())
 
             if action == 0:
-                deal_count += 1
+                deal_decisions += 1
+                took_deal = True
 
             episode_return += reward
 
@@ -161,12 +165,15 @@ def evaluate_policy(policy, eval_env, num_episodes: int):
             step += 1
 
         returns.append(episode_return)
+        if took_deal:
+            deal_episodes += 1
 
     stats = SummaryStats(
         avg_return=float(np.mean(returns)),
         median_return=float(np.median(returns)),
         std_return=float(np.std(returns)),
-        deal_rate=float(deal_count / max(len(rows), 1)),
+        deal_rate_per_decision=float(deal_decisions / max(len(rows), 1)),
+        deal_rate_per_episode=float(deal_episodes / max(len(returns), 1)),
         total_episodes=len(returns),
     )
     return rows, stats
@@ -233,7 +240,8 @@ def main() -> None:
     print(f"Average return: {stats.avg_return:.2f}")
     print(f"Median return: {stats.median_return:.2f}")
     print(f"Std return: {stats.std_return:.2f}")
-    print(f"Deal action rate: {stats.deal_rate:.3f}")
+    print(f"Deal action rate (per decision): {stats.deal_rate_per_decision:.3f}")
+    print(f"Deal action rate (per episode): {stats.deal_rate_per_episode:.3f}")
 
     bins = [0.0, 0.6, 0.8, 1.0, 1.2, 2.0, 10.0]
     ratio_summary = summarize_by_ratio(rows, bins)
